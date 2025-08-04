@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>route planning</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="text" id="start" placeholder="Start address" />
+        <input type="text" id="end" placeholder="End address" />
+        <label for="speedSlider">Speed: <span id="speedValue">80</span> m/s</label>
+        <input type="range" id="speedSlider" min="0" max="300" value="80" />
+
+        <button onclick="startSimulation()">start simulation</button>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        mapboxgl.accessToken = "pk.eyJ1IjoiZ3JlZW53YWxkdGF5bG9yIiwiYSI6ImNqeHNhY2FpczBoa28zaG55cnJwemVncTkifQ.zwChchfKxfRgV2c_54GlyA";
+
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v11',
+            center: [-84.51, 39.10],
+            zoom: 13
+        });
+        let marker = null;
+        let ticker = null;
+        let lastCoords = null;
+        let nextCoords = null;
+        let animationStartTime = null;
+        const animationDuration = 200; // 0.2 seconds per tick
+
+        async function startSimulation() {
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+
+            const res = await fetch('/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    graph_path: 'graphs/ham_county_drive.graphml',
+                    start_address: start,
+                    end_address: end
+                })
+            });
+
+            const data = await res.json();
+            if (data.error) {
+                alert("Error: " + data.error);
+                return;
+            }
+
+            const routeRes = await fetch('/route');
+            const routeData = await routeRes.json();
+
+            if (routeData.geometry) {
+                if (map.getSource('route-line')) {
+                    map.removeLayer('route-layer');
+                    map.removeSource('route-line');
+                }
+
+                map.addSource('route-line', {
+                    type: 'geojson',
+                    data: {
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: routeData.geometry
+                        }
+                    }
+                });
+
+                map.addLayer({
+                    id: 'route-layer',
+                    type: 'line',
+                    source: 'route-line',
+                    layout: {
+                        'line-join': 'round',
+                        'line-cap': 'round'
+                    },
+                    paint: {
+                        'line-color': '#3b9ddd',
+                        'line-width': 5
+                    }
+                });
+
+                const [lon, lat] = routeData.geometry[0];
+                map.flyTo({ center: [lon, lat], zoom: 15 });
+            }
+
+            await fetch('/set_speed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ speed: 250 })  // speed (m/s)
+            });
+
+            if (ticker) clearInterval(ticker);
+            ticker = setInterval(fetchNextCoords, animationDuration);
+            await fetchNextCoords();
+            requestAnimationFrame(animateMarker);
+        }
+
+        async function fetchNextCoords() {
+            await fetch('/tick', { method: 'POST' });
+            const res = await fetch('/state');
+            const data = await res.json();
+
+            if (data.coords) {
+                lastCoords = nextCoords || data.coords;
+                nextCoords = data.coords;
+                animationStartTime = performance.now();
+
+                if (!marker) {
+                    marker = new mapboxgl.Marker().setLngLat(nextCoords).addTo(map);
+                }
+
+                if (data.finished) {
+                    clearInterval(ticker);
+                    alert("simulation finished");
+                }
+            }
+        }
+
+        function animateMarker(timestamp) {
+            if (!lastCoords || !nextCoords || !animationStartTime) {
+                requestAnimationFrame(animateMarker);
+                return;
+            }
+            const progress = Math.min((timestamp - animationStartTime) / animationDuration, 1);
+            const lon = lastCoords[0] + (nextCoords[0] - lastCoords[0]) * progress;
+            const lat = lastCoords[1] + (nextCoords[1] - lastCoords[1]) * progress;
+            marker.setLngLat([lon, lat]);
+            requestAnimationFrame(animateMarker);
+        }
+
+        const speedSlider = document.getElementById("speedSlider");
+        const speedValue = document.getElementById("speedValue");
+
+        speedSlider.addEventListener("input", async () => {
+            const newSpeed = parseInt(speedSlider.value);
+            speedValue.textContent = newSpeed;
+            
+            await fetch('/set_speed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ speed: newSpeed })
+            });
+        });
+
+    </script>
+</body>
+</html>

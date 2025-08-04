@@ -1,96 +1,80 @@
-import math
 from heapq import heappush, heappop
+from simulator import geo_utils as gu
 import osmnx as ox
+import shapely
+from shapely.geometry import LineString
 
-class RouteHandler:
-    def __init__(self):
-        self.start = None
-        self.end = None
-        self.graph = None
-        self.route = None
+def load_graph_from_file(filepath):
+    graph = ox.load_graphml(filepath)
+    ox.add_edge_speeds(graph, hwy_speeds=112, fallback=48) # 70mph, 30mph
+    ox.add_edge_travel_times(graph)
+    ox.add_edge_bearings(graph)
+    return graph
 
-    def set_start(self, start):
-        self.start = self.location_to_node(start)
+# return nearest node from location (str input)
+def location_to_node(graph, location_str):
+    coords = ox.geocode(location_str)
+    nearest_node = ox.nearest_nodes(graph, X=coords[1], Y=coords[0])
+    return nearest_node
 
-    def set_end(self, end):
-        self.end = self.location_to_node(end)
-    
-    def set_graph(self, graph):
-        self.graph = ox.load_graphml(graph)
-        ox.add_edge_speeds(self.graph, hwy_speeds=112, fallback=48) # 70mph, 30mph (optimize later)
-        ox.add_edge_travel_times(self.graph)
+def coords_to_node(graph, coords):
+    lon, lat = coords
+    return ox.nearest_nodes(graph, X=lon, Y=lat)
 
-    # Return nearest node from location (str input)
-    def location_to_node(self, location):
-        coords = ox.geocode(location)
-        nearest_node = ox.nearest_nodes(self.graph, X=coords[1], Y=coords[0])
-        return nearest_node
+# return array of neighbor nodes
+def get_neighbors(graph, node):
+    return list(graph.neighbors(node))
 
-    # Return gc distance between nodes (meters)
-    def haversine(self, node_1, node_2):
-        start_lat = self.graph.nodes[node_1]['y']
-        start_lon = self.graph.nodes[node_1]['x']
-        end_lat = self.graph.nodes[node_2]['y']
-        end_lon = self.graph.nodes[node_2]['x']
+# return travel time between two nodes (seconds)
+def edge_cost_travel_time(graph, node_1, node_2):
+    edges = graph.get_edge_data(node_1, node_2)
+    if not edges:
+        return float('inf')
+    return min(d.get('travel_time', float('inf')) for d in edges.values())
 
-        phi_1 = math.radians(start_lat)
-        lambda_1 = start_lon
-        phi_2 = math.radians(end_lat)
-        lambda_2 = end_lon
-        delta_phi = phi_2 - phi_1
-        delta_lambda = math.radians(lambda_2 - lambda_1)
-        r = 6371000 # earth radius (m)
-        d = 2 * r * math.sqrt((1 - math.cos(delta_phi) + (math.cos(phi_1) * math.cos(phi_2) * (1 - math.cos(delta_lambda)))) / 2)
-        return d
+def reconstruct_route(came_from, current):
+    route = [current]
+    while current in came_from:
+        current = came_from[current]
+        route.insert(0, current)
+    return route
 
-    # Return travel time between two nodes (seconds)
-    def edge_cost_travel_time(self, node_1, node_2):
-        edges = self.graph.get_edge_data(node_1, node_2)
-        if not edges:
-            return float('inf')
-        return min(d.get('travel_time', float('inf')) for d in edges.values())
+# calculate route (A*) and set route
+def calculate_route(graph, start_node, end_node):
+    max_speed_mph = 70 # miles per hour
+    max_speed_mps = (max_speed_mph * 1609.34) / 3600 # meters per second
+    open_set = []
+    start_heuristic = gu.get_geodesic_distance(graph, start_node, end_node) / max_speed_mps
+    heappush(open_set, (start_heuristic, start_node))
+    open_set_lookup = {start_node}
+    came_from = {}
+    g_score = {start_node: 0}
+    f_score = {start_node: start_heuristic}
 
-    # Return array of neighbor nodes
-    def get_neighbors(self, node):
-        return list(self.graph.neighbors(node))
+    while open_set:
+        _, current = heappop(open_set)
+        open_set_lookup.remove(current)
+        if current == end_node:
+            return reconstruct_route(came_from, current)
+        for neighbor in get_neighbors(graph, current):
+            travel_time = edge_cost_travel_time(graph, current, neighbor)
+            tentative_g = g_score[current] + travel_time
+            if tentative_g < g_score.get(neighbor, float('inf')):
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                heuristic_time = gu.get_geodesic_distance(graph, neighbor, end_node) / max_speed_mps
+                f_score[neighbor] = tentative_g + heuristic_time
+                if neighbor not in open_set_lookup:
+                    heappush(open_set, (f_score[neighbor], neighbor))
+                    open_set_lookup.add(neighbor)
+    return None
 
-    def reconstruct_route(self, came_from, current):
-        route = [current]
-        while current in came_from:
-            current = came_from[current]
-            route.insert(0, current)
-        return route
-
-    # Calculate route (A*) and set route
-    def calculate_route(self):
-        if self.start is None or self.end is None or self.graph is None:
-            raise ValueError("Start, end, or graph is missing")
-        max_speed_mh = 112654 # m/hr (70 mph)
-        m_per_sec = max_speed_mh / 3600 # m/s
-        open_set = []
-        start_heuristic = self.haversine(self.start, self.end) / m_per_sec
-        heappush(open_set, (start_heuristic, self.start))
-        open_set_lookup = {self.start}
-        came_from = {}
-        g_score = {self.start: 0}
-        f_score = {self.start: start_heuristic}
-
-        while open_set:
-            _, current = heappop(open_set)
-            open_set_lookup.remove(current)
-            if current == self.end:
-                route = self.reconstruct_route(came_from, current)
-                self.route = route
-                return route
-            for neighbor in self.get_neighbors(current):
-                travel_time = self.edge_cost_travel_time(current, neighbor)
-                tentative_g = g_score[current] + travel_time
-                if tentative_g < g_score.get(neighbor, float('inf')):
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    heuristic_time = self.haversine(neighbor, self.end) / m_per_sec
-                    f_score[neighbor] = tentative_g + heuristic_time
-                    if neighbor not in open_set_lookup:
-                        heappush(open_set, (f_score[neighbor], neighbor))
-                        open_set_lookup.add(neighbor)
-        return None
+# route display
+def get_route_geometry(graph, route):
+    if not graph or not route:
+        return []
+    coords = []
+    for i in range(len(route) - 1):
+        edge_coords = gu.get_edge_geometry_coords(graph, route[i], route[i + 1])
+        coords.extend(edge_coords)
+    return coords
