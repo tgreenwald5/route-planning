@@ -164,6 +164,34 @@
             requestAnimationFrame(animateMarker);
         }
 
+        async function refreshRouteLine() {
+            const routeRes = await fetch('/route');
+            const routeData = await routeRes.json();
+            if (!routeData.geometry) {
+                return
+            }
+            if (map.getLayer('route-layer')) {
+                map.removeLayer('route-layer');
+            }
+            if (map.getSource('route-line')) {
+                map.removeSource('route-line');
+            }
+            map.addSource('route-line', {
+                type: 'geojson',
+                data: {
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: routeData.geometry }
+                }
+            });
+            map.addLayer({
+                id: 'route-layer',
+                type: 'line',
+                source: 'route-line',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
+            });
+        }
+
         const speedSlider = document.getElementById("speedSlider");
         const speedValue = document.getElementById("speedValue");
         speedSlider.addEventListener("input", async () => {
@@ -210,15 +238,23 @@
                 clearInterval(ticker); ticker = null; 
             }
             const junctionRes = await fetch('/state');
-            const { coords: junctionCoords } = await junctionRes.json();
-            marker.setLngLat(junctionCoords);
-            lastCoords = junctionCoords;
-            nextCoords = junctionCoords;
-            segmentStartTime = null;
+            const state = await junctionRes.json();
+            if (state.coords) {
+                if (marker) {
+                    marker.setLngLat(state.coords);
+                }
+                lastCoords = state.coords;
+                nextCoords = state.coords;
+                segmentStartTime = null;
+            }
+            if (state.route_changed) {
+                await refreshRouteLine();
+            }
             ticker = setInterval(fetchNextCoords, animationDuration);
         }
-
+        
         pollState();
+
     </script>
 </body>
 </html>

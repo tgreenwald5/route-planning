@@ -65,6 +65,7 @@ def tick():
 def route():
     try:
         geometry = rh.get_route_geometry(sim.graph, sim.route)
+        sim.route_changed = False
         return jsonify({"geometry": geometry})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

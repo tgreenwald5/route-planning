@@ -40,6 +40,7 @@ class DrivingSimulator:
 
         self.awaiting_junc_choice = False
         self.junc_options = []
+        self.route_changed = False
          
     def start(self):
         if self.graph == None or self.route == None:
@@ -194,24 +195,34 @@ class DrivingSimulator:
             raise ValueError("invalid junc choice")
         old_speed = self.current_speed
         end_node = self.route[-1]
-        partial_route = rh.calculate_route(self.graph, next_node, end_node)
-        new_route = [self.current_node] + partial_route
-        self.load_route(self.graph, new_route)
-        self.awaiting_junc_choice = False
-        self.junc_options = []
 
-        self.current_node_index = 0
-        self.current_node = new_route[0]
-        next_edge = new_route[1]
-        self.geometry_coords = gu.get_edge_geometry_coords(self.graph, self.current_node, next_edge)
+        # if direction user chooses isn't apart of current route
+        if next_node != self.route[self.current_node_index + 1]:
+            partial_route = rh.calculate_route(self.graph, next_node, end_node)
+            new_route = [self.current_node] + partial_route
+            self.load_route(self.graph, new_route)
+            self.current_node_index = 0
+            self.current_node = self.route[0]
+            self.route_changed = True
 
+        # if direction user chooses is apart of current route
+        else: 
+            #self.current_node_index += 1
+            self.current_node = self.route[self.current_node_index]
+
+        # set next edge
+        next_edge_node = self.route[self.current_node_index + 1]
+        self.geometry_coords = gu.get_edge_geometry_coords(self.graph, self.current_node, next_edge_node)
         self.segment_index = 0
         self.progress_along_segment = 0.0
         self.current_coords = self.geometry_coords[0]
 
+        # reset and resume
+        self.awaiting_junc_choice = False
+        self.junc_options = []
         self.set_speed(old_speed)
         self.resume()
-
+        
     # generate new route
     def trigger_reroute(self):
         start_node = rh.coords_to_node(self.graph, self.current_coords)
@@ -240,5 +251,6 @@ class DrivingSimulator:
             "finished": self.finished,
             "awaiting_junc_choice": self.awaiting_junc_choice,
             "junc_options": self.junc_options,
-            "paused": self.paused
+            "paused": self.paused,
+            "route_changed": self.route_changed
         }
