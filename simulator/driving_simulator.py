@@ -37,6 +37,9 @@ class DrivingSimulator:
         self.segment_index = 0
         self.progress_along_segment = 0
         self.current_edge = None 
+
+        self.awaiting_junc_choice = False
+        self.junc_options = []
          
     def start(self):
         if self.graph == None or self.route == None:
@@ -51,7 +54,6 @@ class DrivingSimulator:
         self.current_bearing = gu.get_bearing(self.geometry_coords[0], self.geometry_coords[1])
         self.current_edge = list(self.graph.get_edge_data(self.current_node, next_node).values())[0]
         self.elapsed_time = 0
-        self.current_speed = 0
         self.finished = False
         self.paused = False
         self.travel_log.clear()
@@ -85,7 +87,6 @@ class DrivingSimulator:
             raise ValueError("tick and speed must be positive")
 
         distance_to_travel = self.tick_interval * self.current_speed # distance needed to travel in curr tick
-
 
         while distance_to_travel > 0:
             # check if there is a next segment
@@ -132,6 +133,31 @@ class DrivingSimulator:
                     self.current_node_index += 1
                     self.current_node = self.route[self.current_node_index]
 
+                    # check if at junction
+                    if not self.awaiting_junc_choice:
+                        successors = list(self.graph.successors(self.current_node))
+                        if len(successors) >= 2:
+                            options = []
+                            for s in successors:
+                                edge_data = list(self.graph.get_edge_data(self.current_node, s).values())[0]
+                                street = edge_data.get("name", "Unnamed Road")
+                                coords = gu.get_edge_geometry_coords(self.graph, self.current_node, s)
+                                if len(coords) < 2:
+                                    continue
+                                bearing = gu.get_bearing(coords[0], coords[1])
+                                turn = gu.get_turn_dir(self.current_bearing, bearing)
+                                options.append({
+                                    "node_id": s,
+                                    "street": street,
+                                    "bearing": bearing,
+                                    "turn": turn
+                                })
+                            if options:
+                                self.awaiting_junc_choice = True
+                                self.junc_options = options
+                                self.pause()
+                                return
+
                     # check if there is a next node
                     if self.current_node_index + 1 >= len(self.route):
                         raise IndexError("route ended early. no next node")
@@ -161,11 +187,35 @@ class DrivingSimulator:
     def load_route(self, graph, route):
         self.graph = graph
         self.route = route
+    
+    # at junction, choose direction to proceed in
+    def choose_junction_node(self, next_node):
+        if next_node not in [opt["node_id"] for opt in self.junc_options]:
+            raise ValueError("invalid junc choice")
+        old_speed = self.current_speed
+        end_node = self.route[-1]
+        partial_route = rh.calculate_route(self.graph, next_node, end_node)
+        new_route = [self.current_node] + partial_route
+        self.load_route(self.graph, new_route)
+        self.awaiting_junc_choice = False
+        self.junc_options = []
+
+        self.current_node_index = 0
+        self.current_node = new_route[0]
+        next_edge = new_route[1]
+        self.geometry_coords = gu.get_edge_geometry_coords(self.graph, self.current_node, next_edge)
+
+        self.segment_index = 0
+        self.progress_along_segment = 0.0
+        self.current_coords = self.geometry_coords[0]
+
+        self.set_speed(old_speed)
+        self.resume()
 
     # generate new route
     def trigger_reroute(self):
         start_node = rh.coords_to_node(self.graph, self.current_coords)
-        end_node = self.route[len(self.route) - 1]
+        end_node = self.route[-1]
         new_route = rh.calculate_route(self.graph, start_node, end_node)
         self.load_route(self.graph, new_route)
         self.start()
@@ -187,5 +237,8 @@ class DrivingSimulator:
         return {
             "coords": self.current_coords,
             "bearing": self.current_bearing,
-            "finished": self.finished
+            "finished": self.finished,
+            "awaiting_junc_choice": self.awaiting_junc_choice,
+            "junc_options": self.junc_options,
+            "paused": self.paused
         }

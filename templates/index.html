@@ -24,13 +24,24 @@
     <div class="controls">
         <input type="text" id="start" placeholder="Start address" />
         <input type="text" id="end" placeholder="End address" />
-        <label for="speedSlider">Speed: <span id="speedValue">80</span> m/s</label>
+        <label for="speedSlider">Speed: <span id="speedValue">0</span> m/s</label>
         <input type="range" id="speedSlider" min="0" max="300" value="80" />
-
         <button onclick="startSimulation()">start simulation</button>
     </div>
+    <div id="junction-controls" style="
+        display: none;
+        position: absolute;
+        top: 130px;
+        left: 10px;
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        z-index: 2;
+    ">
+        <h4>Choose direction at junction:</h4>
+        <div id="junction-options"></div>
+    </div>
     <div id="map"></div>
-
     <script>
         mapboxgl.accessToken = "pk.eyJ1IjoiZ3JlZW53YWxkdGF5bG9yIiwiYSI6ImNqeHNhY2FpczBoa28zaG55cnJwemVncTkifQ.zwChchfKxfRgV2c_54GlyA";
 
@@ -40,12 +51,13 @@
             center: [-84.51, 39.10],
             zoom: 13
         });
+
         let marker = null;
         let ticker = null;
         let lastCoords = null;
         let nextCoords = null;
-        let animationStartTime = null;
-        const animationDuration = 200; // 0.2 seconds per tick
+        let segmentStartTime = null;
+        const animationDuration = 200; // ms per segment
 
         async function startSimulation() {
             const start = document.getElementById('start').value;
@@ -60,58 +72,49 @@
                     end_address: end
                 })
             });
-
             const data = await res.json();
             if (data.error) {
                 alert("Error: " + data.error);
                 return;
             }
 
+            // draw route line
             const routeRes = await fetch('/route');
             const routeData = await routeRes.json();
-
             if (routeData.geometry) {
                 if (map.getSource('route-line')) {
                     map.removeLayer('route-layer');
                     map.removeSource('route-line');
                 }
-
                 map.addSource('route-line', {
                     type: 'geojson',
                     data: {
                         type: 'Feature',
-                        geometry: {
-                            type: 'LineString',
-                            coordinates: routeData.geometry
-                        }
+                        geometry: { type: 'LineString', coordinates: routeData.geometry }
                     }
                 });
-
                 map.addLayer({
                     id: 'route-layer',
                     type: 'line',
                     source: 'route-line',
-                    layout: {
-                        'line-join': 'round',
-                        'line-cap': 'round'
-                    },
-                    paint: {
-                        'line-color': '#3b9ddd',
-                        'line-width': 5
-                    }
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
                 });
-
                 const [lon, lat] = routeData.geometry[0];
                 map.flyTo({ center: [lon, lat], zoom: 15 });
             }
 
+            const initSpeed = parseInt(document.getElementById('speedSlider').value, 10);
             await fetch('/set_speed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ speed: 250 })  // speed (m/s)
+                body: JSON.stringify({ speed: initSpeed })
             });
 
-            if (ticker) clearInterval(ticker);
+            // start fetching ticks and animating
+            if (ticker) {
+                clearInterval(ticker);
+            }
             ticker = setInterval(fetchNextCoords, animationDuration);
             await fetchNextCoords();
             requestAnimationFrame(animateMarker);
@@ -122,15 +125,21 @@
             const res = await fetch('/state');
             const data = await res.json();
 
+            if (data.awaiting_junc_choice) {
+                clearInterval(ticker);
+                ticker = null;
+                return;
+            }
+
             if (data.coords) {
                 lastCoords = nextCoords || data.coords;
                 nextCoords = data.coords;
-                animationStartTime = performance.now();
+                // reset per-segment clock
+                segmentStartTime = null;
 
                 if (!marker) {
                     marker = new mapboxgl.Marker().setLngLat(nextCoords).addTo(map);
                 }
-
                 if (data.finished) {
                     clearInterval(ticker);
                     alert("simulation finished");
@@ -139,11 +148,16 @@
         }
 
         function animateMarker(timestamp) {
-            if (!lastCoords || !nextCoords || !animationStartTime) {
-                requestAnimationFrame(animateMarker);
-                return;
+            if (!lastCoords || !nextCoords) {
+                return requestAnimationFrame(animateMarker);
             }
-            const progress = Math.min((timestamp - animationStartTime) / animationDuration, 1);
+            if (segmentStartTime === null) {
+                segmentStartTime = timestamp;
+            }
+            let progress = (timestamp - segmentStartTime) / animationDuration;
+            if (progress > 1) {
+                progress = 1;
+            }
             const lon = lastCoords[0] + (nextCoords[0] - lastCoords[0]) * progress;
             const lat = lastCoords[1] + (nextCoords[1] - lastCoords[1]) * progress;
             marker.setLngLat([lon, lat]);
@@ -152,11 +166,9 @@
 
         const speedSlider = document.getElementById("speedSlider");
         const speedValue = document.getElementById("speedValue");
-
         speedSlider.addEventListener("input", async () => {
-            const newSpeed = parseInt(speedSlider.value);
+            const newSpeed = parseInt(speedSlider.value, 10);
             speedValue.textContent = newSpeed;
-            
             await fetch('/set_speed', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -164,6 +176,49 @@
             });
         });
 
+        async function pollState() {
+            const res = await fetch('/state');
+            const state = await res.json();
+            if (state.awaiting_junc_choice && state.junc_options?.length) {
+                showJunctionOptions(state.junc_options);
+                document.getElementById('junction-controls').style.display = 'block';
+            } else {
+                document.getElementById('junction-controls').style.display = 'none';
+            }
+            setTimeout(pollState, 1000);
+        }
+
+        function showJunctionOptions(options) {
+            const container = document.getElementById('junction-options');
+            container.innerHTML = '';
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.innerText = `${opt.turn.toUpperCase()} onto ${opt.street}`;
+                btn.onclick = () => chooseJunction(opt.node_id);
+                container.appendChild(btn);
+            });
+        }
+
+        async function chooseJunction(nodeId) {
+            await fetch('/choose_junction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ next_node: nodeId })
+            });
+            document.getElementById('junction-controls').style.display = 'none';
+            if (ticker) {
+                clearInterval(ticker); ticker = null; 
+            }
+            const junctionRes = await fetch('/state');
+            const { coords: junctionCoords } = await junctionRes.json();
+            marker.setLngLat(junctionCoords);
+            lastCoords = junctionCoords;
+            nextCoords = junctionCoords;
+            segmentStartTime = null;
+            ticker = setInterval(fetchNextCoords, animationDuration);
+        }
+
+        pollState();
     </script>
 </body>
 </html>

@@ -71,7 +71,20 @@ def route():
 
 @app.route('/state', methods=['GET'])
 def state():
-    return jsonify(sim.get_state())
+    try:
+        state = sim.get_state()
+        return jsonify(state)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/choose_junction', methods=['POST'])
+def choose_junction():
+    try:
+        next_node = request.json['next_node']
+        sim.choose_junction_node(next_node)
+        return jsonify({"message": "reroute successful"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/')
 def index():
