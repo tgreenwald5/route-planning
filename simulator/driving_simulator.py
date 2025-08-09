@@ -139,19 +139,31 @@ class DrivingSimulator:
                         successors = list(self.graph.successors(self.current_node))
                         if len(successors) >= 2:
                             options = []
+                            if self.current_node_index > 0:
+                                prev_node = self.route[self.current_node_index - 1]
+                            else:
+                                prev_node = None
                             for s in successors:
+                                if s == prev_node:
+                                    continue
                                 edge_data = list(self.graph.get_edge_data(self.current_node, s).values())[0]
                                 street = edge_data.get("name", "Unnamed Road")
                                 coords = gu.get_edge_geometry_coords(self.graph, self.current_node, s)
                                 if len(coords) < 2:
                                     continue
                                 bearing = gu.get_bearing(coords[0], coords[1])
+                                try:
+                                    step_m = 8.0
+                                    hint_coords = gu.interpolate_position(coords[0], step_m, bearing)
+                                except Exception:
+                                    hint_coords = coords[1]
                                 turn = gu.get_turn_dir(self.current_bearing, bearing)
                                 options.append({
                                     "node_id": s,
                                     "street": street,
                                     "bearing": bearing,
-                                    "turn": turn
+                                    "turn": turn,
+                                    "hint_coords": hint_coords
                                 })
                             if options:
                                 self.awaiting_junc_choice = True
@@ -207,7 +219,6 @@ class DrivingSimulator:
 
         # if direction user chooses is apart of current route
         else: 
-            #self.current_node_index += 1
             self.current_node = self.route[self.current_node_index]
 
         # set next edge

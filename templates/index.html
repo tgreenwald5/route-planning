@@ -18,6 +18,21 @@
             padding: 10px;
             border-radius: 5px;
         }
+        .direction-marker {
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 20px solid #f79e99;
+            transform-origin: center center;
+        }
+        .junction-arrow {
+            border-bottom-color: #59b36e;
+            cursor: pointer;
+            border-left-width: 8px;
+            border-right-width: 8px;
+            border-bottom-width: 16px;
+        }
     </style>
 </head>
 <body>
@@ -28,19 +43,7 @@
         <input type="range" id="speedSlider" min="0" max="300" value="80" />
         <button onclick="startSimulation()">start simulation</button>
     </div>
-    <div id="junction-controls" style="
-        display: none;
-        position: absolute;
-        top: 130px;
-        left: 10px;
-        background: white;
-        padding: 10px;
-        border-radius: 5px;
-        z-index: 2;
-    ">
-        <h4>Choose direction at junction:</h4>
-        <div id="junction-options"></div>
-    </div>
+    
     <div id="map"></div>
     <script>
         mapboxgl.accessToken = "pk.eyJ1IjoiZ3JlZW53YWxkdGF5bG9yIiwiYSI6ImNqeHNhY2FpczBoa28zaG55cnJwemVncTkifQ.zwChchfKxfRgV2c_54GlyA";
@@ -57,7 +60,27 @@
         let lastCoords = null;
         let nextCoords = null;
         let segmentStartTime = null;
-        const animationDuration = 200; // ms per segment
+        const animationDuration = 200;
+        let junctionArrowMarkers = [];
+
+        function clearJunctionArrows() {
+            junctionArrowMarkers.forEach(m => m.remove());
+            junctionArrowMarkers = [];
+        }
+
+        function showJunctionArrows(options) {
+            clearJunctionArrows();
+            options.forEach(opt => {
+                const wrapper = document.createElement('div');
+                const tri = document.createElement('div');
+                tri.className = 'direction-marker junction-arrow';
+                wrapper.appendChild(tri);
+                const m = new mapboxgl.Marker(wrapper).setLngLat(opt.hint_coords).addTo(map);
+                tri.style.transform = `rotate(${opt.bearing}deg)`;
+                wrapper.addEventListener('click', () => chooseJunction(opt.node_id));
+                junctionArrowMarkers.push(m);
+            });
+        }
 
         async function startSimulation() {
             const start = document.getElementById('start').value;
@@ -78,7 +101,6 @@
                 return;
             }
 
-            // draw route line
             const routeRes = await fetch('/route');
             const routeData = await routeRes.json();
             if (routeData.geometry) {
@@ -111,7 +133,6 @@
                 body: JSON.stringify({ speed: initSpeed })
             });
 
-            // start fetching ticks and animating
             if (ticker) {
                 clearInterval(ticker);
             }
@@ -134,12 +155,22 @@
             if (data.coords) {
                 lastCoords = nextCoords || data.coords;
                 nextCoords = data.coords;
-                // reset per-segment clock
-                segmentStartTime = null;
 
                 if (!marker) {
-                    marker = new mapboxgl.Marker().setLngLat(nextCoords).addTo(map);
+                    const wrapper = document.createElement('div');
+                    const triangle = document.createElement('div');
+                    triangle.className = 'direction-marker';
+                    wrapper.appendChild(triangle);
+                    marker = new mapboxgl.Marker(wrapper).setLngLat(nextCoords).addTo(map);
                 }
+
+                const triangleEl = marker.getElement().querySelector('.direction-marker');
+                if (triangleEl && data.bearing !== null && data.bearing !== undefined) {
+                    triangleEl.style.transform = `rotate(${data.bearing}deg)`;
+                }
+
+                segmentStartTime = null;
+
                 if (data.finished) {
                     clearInterval(ticker);
                     alert("simulation finished");
@@ -208,10 +239,9 @@
             const res = await fetch('/state');
             const state = await res.json();
             if (state.awaiting_junc_choice && state.junc_options?.length) {
-                showJunctionOptions(state.junc_options);
-                document.getElementById('junction-controls').style.display = 'block';
+                showJunctionArrows(state.junc_options);
             } else {
-                document.getElementById('junction-controls').style.display = 'none';
+                clearJunctionArrows();
             }
             setTimeout(pollState, 1000);
         }
@@ -233,26 +263,27 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ next_node: nodeId })
             });
-            document.getElementById('junction-controls').style.display = 'none';
+            clearJunctionArrows();
             if (ticker) {
-                clearInterval(ticker); ticker = null; 
+                clearInterval(ticker); 
+                ticker = null; 
             }
             const junctionRes = await fetch('/state');
             const state = await junctionRes.json();
             if (state.coords) {
                 if (marker) {
                     marker.setLngLat(state.coords);
+                    lastCoords = state.coords;
+                    nextCoords = state.coords;
+                    segmentStartTime = null;
                 }
-                lastCoords = state.coords;
-                nextCoords = state.coords;
-                segmentStartTime = null;
             }
             if (state.route_changed) {
                 await refreshRouteLine();
             }
             ticker = setInterval(fetchNextCoords, animationDuration);
         }
-        
+
         pollState();
 
     </script>
