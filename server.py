@@ -19,7 +19,7 @@ def geocode(address):
         "access_token": MAPBOX_TOKEN,
         "limit": 1
     }
-    response = requests.get(url, params=params, timeout=10)
+    response = requests.get(url, params=params, timeout=60)
     response.raise_for_status()
     data = response.json()
     if not data["features"]:
