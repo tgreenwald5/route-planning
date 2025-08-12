@@ -1,0 +1,7 @@
+Flask
+requests
+python-dotenv
+osmnx
+geopy
+shapely
+gunicorn
