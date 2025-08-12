@@ -1,291 +1,406 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="light">
 <head>
-    <meta charset="utf-8" />
-    <title>route planning</title>
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
-    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
-    <style>
-        body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .controls {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 1;
-            background: white;
-            padding: 10px;
-            border-radius: 5px;
-        }
-        .direction-marker {
-            width: 0;
-            height: 0;
-            border-left: 10px solid transparent;
-            border-right: 10px solid transparent;
-            border-bottom: 20px solid #f79e99;
-            transform-origin: center center;
-        }
-        .junction-arrow {
-            border-bottom-color: #59b36e;
-            cursor: pointer;
-            border-left-width: 8px;
-            border-right-width: 8px;
-            border-bottom-width: 16px;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <title>Route Planning</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { position: absolute; inset: 0; }
+    .direction-marker {
+      width: 0; height: 0;
+      border-left: 10px solid transparent;
+      border-right: 10px solid transparent;
+      border-bottom: 20px solid #f81313;
+      transform-origin: center center;
+    }
+  </style>
 </head>
 <body>
-    <div class="controls">
-        <input type="text" id="start" placeholder="Start address" />
-        <input type="text" id="end" placeholder="End address" />
-        <label for="speedSlider">Speed: <span id="speedValue">0</span> m/s</label>
-        <input type="range" id="speedSlider" min="0" max="300" value="80" />
-        <button onclick="startSimulation()">start simulation</button>
+  <div id="map"></div>
+
+  <!-- setup panel -->
+  <div id="panel-setup" class="absolute top-4 left-4 w-full max-w-sm">
+    <div class="card bg-base-100 shadow-xl">
+      <div class="card-body gap-4">
+        <h2 class="card-title">Enter Route</h2>
+
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Start Address</legend>
+          <input id="start" type="text" class="input input-bordered w-full" placeholder="Enter Start Address" />
+        </fieldset>
+
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">End Address</legend>
+          <input id="end" type="text" class="input input-bordered w-full" placeholder="Enter End Address" />
+        </fieldset>
+
+        <div class="card-actions justify-end">
+          <button id="beginBtn" class="btn btn-primary">Begin Route</button>
+        </div>
+      </div>
     </div>
-    
-    <div id="map"></div>
-    <script>
-        mapboxgl.accessToken = "pk.eyJ1IjoiZ3JlZW53YWxkdGF5bG9yIiwiYSI6ImNqeHNhY2FpczBoa28zaG55cnJwemVncTkifQ.zwChchfKxfRgV2c_54GlyA";
+  </div>
 
-        const map = new mapboxgl.Map({
-            container: 'map',
-            style: 'mapbox://styles/mapbox/streets-v11',
-            center: [-84.51, 39.10],
-            zoom: 13
+  <!-- in route panel -->
+  <div id="panel-route" class="absolute top-4 left-4 w-full max-w-sm hidden">
+    <div class="card bg-base-100 shadow-xl">
+      <div class="card-body gap-4">
+        <h2 class="card-title">In Route</h2>
+
+        <div class="space-y-1 text-sm">
+          <div><span class="opacity-60">Start:</span> <span id="displayStart" class="font-medium"></span></div>
+          <div><span class="opacity-60">End:</span> <span id="displayEnd" class="font-medium"></span></div>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <span class="font-medium">Speed</span>
+          <span id="speedValue" class="badge">0</span>
+          <div class="join">
+            <button id="speedDown" type="button" class="btn btn-sm join-item">–</button>
+            <button id="speedUp" type="button" class="btn btn-sm join-item">+</button>
+          </div>
+          <span class="text-xs opacity-60">(mph)</span>
+        </div>
+
+        <label class="label cursor-pointer justify-start gap-3">
+          <input id="manualJunctions" type="checkbox" class="toggle" checked />
+          <span class="label-text">Pause for junction choices</span>
+        </label>
+
+        <div class="card-actions justify-end">
+          <button id="newDestBtn" class="btn btn-ghost">New Destination</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+
+    mapboxgl.accessToken = "{{ mapbox_token }}";
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [-84.51, 39.10],
+      zoom: 13
+    });
+
+    let marker = null;
+    let ticker = null;
+    let lastCoords = null;
+    let nextCoords = null;
+    let segmentStartTime = null;
+    const animationDuration = 200;
+
+    let junctionCircMarkers = [];
+
+    let currentSpeed = 0;
+    const SPEED_MIN = 0; 
+    const SPEED_MAX = 300;
+    const SPEED_STEP = 5;
+
+    function show(el) { 
+      el.classList.remove('hidden'); 
+    }
+
+    function hide(el) { 
+      el.classList.add('hidden'); 
+    }
+
+    function updateSpeedUI() {
+      const mph = Math.round(currentSpeed * 2.23694);
+      document.querySelector('#speedValue').textContent = mph;
+      document.querySelector('#speedDown').toggleAttribute('disabled', mph <= SPEED_MIN);
+      document.querySelector('#speedUp').toggleAttribute('disabled', mph >= SPEED_MAX);
+    }
+
+    async function setSpeedOnServer(val) {
+      try {
+        await fetch('/set_speed', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ speed: val })
+        });
+      } catch(e) { 
+          console.error('Failed to set speed', e); 
+        }
+    }
+
+    async function changeSpeed(deltaMph) {
+      const nextMph = Math.max(SPEED_MIN, Math.min(SPEED_MAX, (currentSpeed * 2.23694) + deltaMph));
+      currentSpeed = nextMph / 2.23694;
+      updateSpeedUI();
+      await setSpeedOnServer(currentSpeed);
+    }
+
+    function clearJunctionCircs() {
+      junctionCircMarkers.forEach(m => m.remove());
+      junctionCircMarkers = [];
+    }
+
+    function showJunctionCircs(options) {
+      clearJunctionCircs();
+      options.forEach(opt => {
+        const el = document.createElement('button');
+        el.className = 'btn btn-circle btn-xs btn-primary shadow';
+        el.addEventListener('click', () => chooseJunction(opt.node_id));
+        const m = new mapboxgl.Marker(el).setLngLat(opt.hint_coords).addTo(map);
+        junctionCircMarkers.push(m);
+      });
+    }
+
+    async function chooseJunction(nodeId) {
+      await fetch('/choose_junction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next_node: nodeId })
+      });
+      clearJunctionCircs();
+
+      if (!ticker) {
+        ticker = setInterval(fetchNextCoords, animationDuration);
+      }
+
+      try {
+        const state = await (await fetch('/state')).json();
+        if (state.route_changed) {
+            await refreshRouteLine();
+        }
+      } catch {
+
+      }
+    }
+
+    async function startSimulation() {
+      const start = document.querySelector('#start').value.trim();
+      const end = document.querySelector('#end').value.trim();
+      if (!start || !end) { 
+          alert('Please fill address fields.'); 
+          return; 
+      }
+
+      const btn = document.querySelector('#beginBtn');
+      btn.classList.add('loading'); 
+      btn.setAttribute('disabled', '');
+
+      try {
+        const res = await fetch('/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            graph_path: 'graphs/ham_county_drive.graphml',
+            start_address: start,
+            end_address: end
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || 'Failed to start route');
+        } 
+
+        const routeRes = await fetch('/route');
+        const routeData = await routeRes.json();
+        if (!routeData.geometry) {
+          throw new Error('No route geometry returned');
+        }
+
+        if (map.getSource('route-line')) {
+          map.removeLayer('route-layer');
+          map.removeSource('route-line');
+        }
+        map.addSource('route-line', {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: routeData.geometry } }
+        });
+        map.addLayer({
+          id: 'route-layer',
+          type: 'line',
+          source: 'route-line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
         });
 
-        let marker = null;
-        let ticker = null;
-        let lastCoords = null;
-        let nextCoords = null;
-        let segmentStartTime = null;
-        const animationDuration = 200;
-        let junctionArrowMarkers = [];
+        const [lon, lat] = routeData.geometry[0];
+        map.flyTo({ center: [lon, lat], zoom: 15 });
 
-        function clearJunctionArrows() {
-            junctionArrowMarkers.forEach(m => m.remove());
-            junctionArrowMarkers = [];
+        await setSpeedOnServer(currentSpeed);
+
+        if (ticker) { 
+          clearInterval(ticker);
+        }
+        ticker = setInterval(fetchNextCoords, animationDuration);
+        await fetchNextCoords();
+        requestAnimationFrame(animateMarker);
+
+        document.querySelector('#displayStart').textContent = start;
+        document.querySelector('#displayEnd').textContent = end;
+        hide(document.querySelector('#panel-setup'));
+        show(document.querySelector('#panel-route'));
+      } catch (e) {
+        alert(e.message || 'Could not start route.');
+      } finally {
+        btn.classList.remove('loading');
+        btn.removeAttribute('disabled');
+      }
+    }
+
+    async function fetchNextCoords() {
+      await fetch('/tick', { method: 'POST' });
+      const res = await fetch('/state');
+      const data = await res.json();
+
+      if (data.awaiting_junc_choice) {
+        if (ticker) { 
+          clearInterval(ticker); 
+          ticker = null; 
+        }
+        return;
+      }
+
+      if (data.coords) {
+        lastCoords = nextCoords || data.coords;
+        nextCoords = data.coords;
+
+        if (!marker) {
+          const wrapper = document.createElement('div');
+          const triangle = document.createElement('div');
+          triangle.className = 'direction-marker';
+          wrapper.appendChild(triangle);
+          marker = new mapboxgl.Marker(wrapper).setLngLat(nextCoords).addTo(map);
         }
 
-        function showJunctionArrows(options) {
-            clearJunctionArrows();
-            options.forEach(opt => {
-                const wrapper = document.createElement('div');
-                const tri = document.createElement('div');
-                tri.className = 'direction-marker junction-arrow';
-                wrapper.appendChild(tri);
-                const m = new mapboxgl.Marker(wrapper).setLngLat(opt.hint_coords).addTo(map);
-                tri.style.transform = `rotate(${opt.bearing}deg)`;
-                wrapper.addEventListener('click', () => chooseJunction(opt.node_id));
-                junctionArrowMarkers.push(m);
-            });
+        const tri = marker.getElement().querySelector('.direction-marker');
+        if (tri && data.bearing != null) {
+          tri.style.transform = `rotate(${data.bearing}deg)`;
         }
 
-        async function startSimulation() {
-            const start = document.getElementById('start').value;
-            const end = document.getElementById('end').value;
+        segmentStartTime = null;
 
-            const res = await fetch('/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    graph_path: 'graphs/ham_county_drive.graphml',
-                    start_address: start,
-                    end_address: end
-                })
-            });
-            const data = await res.json();
-            if (data.error) {
-                alert("Error: " + data.error);
-                return;
-            }
-
-            const routeRes = await fetch('/route');
-            const routeData = await routeRes.json();
-            if (routeData.geometry) {
-                if (map.getSource('route-line')) {
-                    map.removeLayer('route-layer');
-                    map.removeSource('route-line');
-                }
-                map.addSource('route-line', {
-                    type: 'geojson',
-                    data: {
-                        type: 'Feature',
-                        geometry: { type: 'LineString', coordinates: routeData.geometry }
-                    }
-                });
-                map.addLayer({
-                    id: 'route-layer',
-                    type: 'line',
-                    source: 'route-line',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
-                });
-                const [lon, lat] = routeData.geometry[0];
-                map.flyTo({ center: [lon, lat], zoom: 15 });
-            }
-
-            const initSpeed = parseInt(document.getElementById('speedSlider').value, 10);
-            await fetch('/set_speed', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ speed: initSpeed })
-            });
-
-            if (ticker) {
-                clearInterval(ticker);
-            }
-            ticker = setInterval(fetchNextCoords, animationDuration);
-            await fetchNextCoords();
-            requestAnimationFrame(animateMarker);
+        if (data.finished) {
+          if (ticker) { 
+            clearInterval(ticker); 
+            ticker = null; 
+          }
+          clearJunctionCircs();
+          alert('Destination reached.');
         }
+      }
+    }
 
-        async function fetchNextCoords() {
-            await fetch('/tick', { method: 'POST' });
-            const res = await fetch('/state');
-            const data = await res.json();
+    function animateMarker(timestamp) {
+      if (!lastCoords || !nextCoords) { 
+        return requestAnimationFrame(animateMarker);
+      }
+      if (segmentStartTime === null) { 
+        segmentStartTime = timestamp;
+      }
+      let progress = (timestamp - segmentStartTime) / animationDuration;
+      if (progress > 1) { 
+        progress = 1;
+      }
+      const lon = lastCoords[0] + (nextCoords[0] - lastCoords[0]) * progress;
+      const lat = lastCoords[1] + (nextCoords[1] - lastCoords[1]) * progress;
+      marker.setLngLat([lon, lat]);
+      requestAnimationFrame(animateMarker);
+    }
 
-            if (data.awaiting_junc_choice) {
-                clearInterval(ticker);
-                ticker = null;
-                return;
-            }
+    async function refreshRouteLine() {
+      const routeRes = await fetch('/route');
+      const routeData = await routeRes.json();
+      if (!routeData.geometry) { 
+        return;
+      }
+      if (map.getLayer('route-layer')) { 
+        map.removeLayer('route-layer');
+      }
+      if (map.getSource('route-line')) { 
+        map.removeSource('route-line');
+      }
+      map.addSource('route-line', {
+        type: 'geojson',
+        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: routeData.geometry } }
+      });
 
-            if (data.coords) {
-                lastCoords = nextCoords || data.coords;
-                nextCoords = data.coords;
+      map.addLayer({
+        id: 'route-layer',
+        type: 'line',
+        source: 'route-line',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
+      });
+    }
 
-                if (!marker) {
-                    const wrapper = document.createElement('div');
-                    const triangle = document.createElement('div');
-                    triangle.className = 'direction-marker';
-                    wrapper.appendChild(triangle);
-                    marker = new mapboxgl.Marker(wrapper).setLngLat(nextCoords).addTo(map);
-                }
+    // UI Events
+    document.querySelector('#beginBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      startSimulation();
+    });
 
-                const triangleEl = marker.getElement().querySelector('.direction-marker');
-                if (triangleEl && data.bearing !== null && data.bearing !== undefined) {
-                    triangleEl.style.transform = `rotate(${data.bearing}deg)`;
-                }
+    document.querySelector('#speedUp').addEventListener('click', () => changeSpeed(+SPEED_STEP));
+    document.querySelector('#speedDown').addEventListener('click', () => changeSpeed(-SPEED_STEP));
+    updateSpeedUI();
 
-                segmentStartTime = null;
-
-                if (data.finished) {
-                    clearInterval(ticker);
-                    alert("simulation finished");
-                }
-            }
-        }
-
-        function animateMarker(timestamp) {
-            if (!lastCoords || !nextCoords) {
-                return requestAnimationFrame(animateMarker);
-            }
-            if (segmentStartTime === null) {
-                segmentStartTime = timestamp;
-            }
-            let progress = (timestamp - segmentStartTime) / animationDuration;
-            if (progress > 1) {
-                progress = 1;
-            }
-            const lon = lastCoords[0] + (nextCoords[0] - lastCoords[0]) * progress;
-            const lat = lastCoords[1] + (nextCoords[1] - lastCoords[1]) * progress;
-            marker.setLngLat([lon, lat]);
-            requestAnimationFrame(animateMarker);
-        }
-
-        async function refreshRouteLine() {
-            const routeRes = await fetch('/route');
-            const routeData = await routeRes.json();
-            if (!routeData.geometry) {
-                return
-            }
-            if (map.getLayer('route-layer')) {
-                map.removeLayer('route-layer');
-            }
-            if (map.getSource('route-line')) {
-                map.removeSource('route-line');
-            }
-            map.addSource('route-line', {
-                type: 'geojson',
-                data: {
-                    type: 'Feature',
-                    geometry: { type: 'LineString', coordinates: routeData.geometry }
-                }
-            });
-            map.addLayer({
-                id: 'route-layer',
-                type: 'line',
-                source: 'route-line',
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: { 'line-color': '#3b9ddd', 'line-width': 5 }
-            });
-        }
-
-        const speedSlider = document.getElementById("speedSlider");
-        const speedValue = document.getElementById("speedValue");
-        speedSlider.addEventListener("input", async () => {
-            const newSpeed = parseInt(speedSlider.value, 10);
-            speedValue.textContent = newSpeed;
-            await fetch('/set_speed', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ speed: newSpeed })
-            });
+    document.querySelector('#manualJunctions').addEventListener('change', async (e) => {
+      const manual = e.target.checked;
+      try {
+        await fetch('/junction_mode', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ manual })
         });
-
-        async function pollState() {
-            const res = await fetch('/state');
-            const state = await res.json();
-            if (state.awaiting_junc_choice && state.junc_options?.length) {
-                showJunctionArrows(state.junc_options);
-            } else {
-                clearJunctionArrows();
-            }
-            setTimeout(pollState, 1000);
-        }
-
-        function showJunctionOptions(options) {
-            const container = document.getElementById('junction-options');
-            container.innerHTML = '';
-            options.forEach(opt => {
-                const btn = document.createElement('button');
-                btn.innerText = `${opt.turn.toUpperCase()} onto ${opt.street}`;
-                btn.onclick = () => chooseJunction(opt.node_id);
-                container.appendChild(btn);
-            });
-        }
-
-        async function chooseJunction(nodeId) {
-            await fetch('/choose_junction', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ next_node: nodeId })
-            });
-            clearJunctionArrows();
-            if (ticker) {
-                clearInterval(ticker); 
-                ticker = null; 
-            }
-            const junctionRes = await fetch('/state');
-            const state = await junctionRes.json();
-            if (state.coords) {
-                if (marker) {
-                    marker.setLngLat(state.coords);
-                    lastCoords = state.coords;
-                    nextCoords = state.coords;
-                    segmentStartTime = null;
-                }
-            }
-            if (state.route_changed) {
-                await refreshRouteLine();
-            }
+        if (!manual) {
+          clearJunctionCircs();
+          if (!ticker) { 
             ticker = setInterval(fetchNextCoords, animationDuration);
+          }
         }
+      } catch (err) { 
+        console.error('Failed to set junction mode', err); }
+    });
 
-        pollState();
+    document.querySelector('#newDestBtn').addEventListener('click', () => {
+      clearJunctionCircs();
+      if (map.getLayer('route-layer')) { 
+        map.removeLayer('route-layer');
+      }
+      if (map.getSource('route-line')) { 
+        map.removeSource('route-line');
+      }
+      if (marker) { 
+        marker.remove(); 
+        marker = null; 
+      }
+      lastCoords = null; 
+      nextCoords = null; 
+      segmentStartTime = null;
+      if (ticker) { 
+        clearInterval(ticker); 
+        ticker = null; 
+      }
+      show(document.querySelector('#panel-setup'));
+      hide(document.querySelector('#panel-route'));
+    });
 
-    </script>
+    async function pollState() {
+      try {
+        const state = await (await fetch('/state')).json();
+        if (state.awaiting_junc_choice && state.junc_options?.length) {
+          showJunctionCircs(state.junc_options);
+        } else {
+          clearJunctionCircs();
+        }
+      } catch {
+
+      }
+      setTimeout(pollState, 1000);
+    };
+    pollState();
+  </script>
 </body>
 </html>

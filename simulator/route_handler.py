@@ -1,22 +1,16 @@
 from heapq import heappush, heappop
 from simulator import geo_utils as gu
 import osmnx as ox
-import shapely
-from shapely.geometry import LineString
 
+# get graph
 def load_graph_from_file(filepath):
     graph = ox.load_graphml(filepath)
-    ox.add_edge_speeds(graph, hwy_speeds=112, fallback=48) # 70mph, 30mph
+    ox.add_edge_speeds(graph, hwy_speeds=112, fallback=48)
     ox.add_edge_travel_times(graph)
     ox.add_edge_bearings(graph)
     return graph
 
-# return nearest node from location (str input)
-def location_to_node(graph, location_str):
-    coords = ox.geocode(location_str)
-    nearest_node = ox.nearest_nodes(graph, X=coords[1], Y=coords[0])
-    return nearest_node
-
+# find nearest node to coords
 def coords_to_node(graph, coords):
     lon, lat = coords
     return ox.nearest_nodes(graph, X=lon, Y=lat)
@@ -41,8 +35,8 @@ def reconstruct_route(came_from, current):
 
 # calculate route (A*) and set route
 def calculate_route(graph, start_node, end_node):
-    max_speed_mph = 70 # miles per hour
-    max_speed_mps = (max_speed_mph * 1609.34) / 3600 # meters per second
+    max_speed_mph = 70 # mph
+    max_speed_mps = (max_speed_mph * 1609.34) / 3600 # m/s
     open_set = []
     start_heuristic = gu.get_geodesic_distance(graph, start_node, end_node) / max_speed_mps
     heappush(open_set, (start_heuristic, start_node))

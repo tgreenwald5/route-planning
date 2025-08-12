@@ -1,9 +1,5 @@
 import osmnx as ox
 from geopy.distance import geodesic
-from shapely.geometry import LineString, Point
-from shapely import transform
-from pyproj import Transformer
-import geopandas as gpd
 
 # return node's (lon, lat)
 def get_node_coords(graph, node):
@@ -19,10 +15,8 @@ def get_edge_geometry_coords(graph, node_1, node_2):
     coords = []
     if 'geometry' in edge:
         coords = list(edge['geometry'].coords)
-
     if len(coords) < 2:
         coords = [get_node_coords(graph, node_1), get_node_coords(graph, node_2)]
-
     return coords
 
 # return bearing between two points
@@ -52,13 +46,3 @@ def interpolate_position(coords, dist, bear):
     interp_point = geodesic(meters=dist).destination((coords[1], coords[0]), bearing=bear)
     interp_coords = (interp_point.longitude, interp_point.latitude)
     return interp_coords
-
-# return turn direction
-def get_turn_dir(curr_bearing, next_bearing):
-    d = (next_bearing - curr_bearing + 540) % 360 - 180
-    if abs(d) < 30:
-        return "straight"
-    elif d > 0:
-        return "right"
-    else:
-        return "left"

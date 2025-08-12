@@ -2,44 +2,42 @@ from flask import Flask, request, jsonify, render_template
 from simulator.driving_simulator import DrivingSimulator
 from simulator import route_handler as rh
 import requests
+from urllib.parse import quote_plus
+import os
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 sim = DrivingSimulator()
 
-MAPBOX_TOKEN = "pk.eyJ1IjoiZ3JlZW53YWxkdGF5bG9yIiwiYSI6ImNqeHNhY2FpczBoa28zaG55cnJwemVncTkifQ.zwChchfKxfRgV2c_54GlyA"
+load_dotenv()
+MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN")
 
 def geocode(address):
-    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{address}.json"
+    qp_address = quote_plus(address)
+    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{qp_address}.json"
     params = {
         "access_token": MAPBOX_TOKEN,
         "limit": 1
     }
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=10)
     response.raise_for_status()
     data = response.json()
     if not data["features"]:
         raise ValueError(f"Address not found: {address}")
-    return tuple(data["features"][0]["center"])  # (lon, lat)
+    return tuple(data["features"][0]["center"])
 
 @app.route('/start', methods=['POST'])
 def start_sim():
     try:
         data = request.json
         graph = rh.load_graph_from_file(data['graph_path'])
-
-        # addresses to (lon, lat)
         start_coords = geocode(data['start_address'])
         end_coords = geocode(data['end_address'])
-
-        # (lon, lat) to nearest node
         start_node = rh.coords_to_node(graph, start_coords)
         end_node = rh.coords_to_node(graph, end_coords)
-
-        # calculate route
         route = rh.calculate_route(graph, start_node, end_node)
         sim.load_route(graph, route)
         sim.start()
-
         return jsonify({"message": "simulation started"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -65,8 +63,11 @@ def tick():
 def route():
     try:
         geometry = rh.get_route_geometry(sim.graph, sim.route)
+        if (not geometry) and getattr(sim, "current_coords", None):
+            geometry = [sim.current_coords]
         sim.route_changed = False
         return jsonify({"geometry": geometry})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -77,6 +78,19 @@ def state():
         return jsonify(state)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/junction_mode', methods=['POST'])
+def junction_mode():
+    try:
+        manual = bool(request.json.get('manual', True))
+        sim.stop_at_junctions = manual
+        if not manual and sim.awaiting_junc_choice:
+            sim.awaiting_junc_choice = False
+            sim.junc_options = []
+            sim.resume()
+        return jsonify({"manual": sim.stop_at_junctions})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/choose_junction', methods=['POST'])
 def choose_junction():
@@ -89,7 +103,7 @@ def choose_junction():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', mapbox_token=MAPBOX_TOKEN)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
