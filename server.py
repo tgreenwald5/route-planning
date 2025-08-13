@@ -5,12 +5,16 @@ import requests
 from urllib.parse import quote_plus
 import os
 from dotenv import load_dotenv
+import pickle
 
 app = Flask(__name__)
 sim = DrivingSimulator()
 
 load_dotenv()
 MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN")
+
+with open("graphs/ham_county_drive.pkl", "rb") as f:
+    PRELOADED_GRAPH = pickle.load(f)
 
 def geocode(address):
     qp_address = quote_plus(address)
@@ -30,7 +34,7 @@ def geocode(address):
 def start_sim():
     try:
         data = request.json
-        graph = rh.load_graph_from_file(data['graph_path'])
+        graph = PRELOADED_GRAPH
         start_coords = geocode(data['start_address'])
         end_coords = geocode(data['end_address'])
         start_node = rh.coords_to_node(graph, start_coords)
