@@ -5,3 +5,4 @@ osmnx
 geopy
 shapely
 gunicorn
+scikit-learn
