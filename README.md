@@ -1,4 +1,4 @@
-# Driving Route Simulator
+# Route Mapping & Driving Simulator
 Calculates a driving route using a start and an end address, simulates and displays progress along route, and lets user control speed and choose next direction at intersections.
 
 ## Live Demo
