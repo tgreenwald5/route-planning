@@ -202,3 +202,26 @@ class DrivingSimulator:
             "paused": self.paused,
             "route_changed": self.route_changed
         }
+    
+    def reset(self):
+        self.graph = None
+        self.route = None
+
+        self.current_node_index = 0
+        self.current_node = None
+        self.current_coords = None
+
+        #self.current_speed = 0
+        self.current_bearing = None
+
+        self.finished = False
+        self.paused = True
+
+        self.geometry_coords = []
+        self.segment_index = 0
+        self.progress_along_segment = 0
+
+        self.awaiting_junc_choice = False
+        self.junc_options = []
+        self.route_changed = False
+        self.stop_at_junctions = True 

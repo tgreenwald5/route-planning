@@ -113,7 +113,6 @@
 
     startBox.addEventListener("retrieve", (e) => {
       const feature = e.detail.features[0];
-      console.log("Feature type:", feature.properties.feature_type);
       setTimeout(() => {
         startBox.value = feature.properties.full_address;
       }, 0);
@@ -229,7 +228,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            graph_path: 'graphs/ham_county_drive.graphml',
+            //graph_path: 'graphs/ham_county_drive.graphml',
             start_address: start,
             end_address: end
           })
@@ -403,7 +402,6 @@
             ticker = setInterval(fetchNextCoords, animationDuration);
           }
           await fetchNextCoords();
-          animating = true;
           requestAnimationFrame(animateMarker);
           segmentStartTime = null;
         }
@@ -412,8 +410,11 @@
       }
     });
 
-    document.querySelector('#endRouteBtn').addEventListener('click', () => {
+    document.querySelector('#endRouteBtn').addEventListener('click', async () => {
       clearJunctionCircs();
+
+      await fetch('/reset', { method: 'POST' });
+
       if (map.getLayer('route-layer')) { 
         map.removeLayer('route-layer');
       }

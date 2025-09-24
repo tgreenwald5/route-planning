@@ -34,6 +34,8 @@ def geocode(address):
 def start_sim():
     try:
         data = request.json
+        sim.reset()
+
         graph = PRELOADED_GRAPH
         start_coords = geocode(data['start_address'])
         end_coords = geocode(data['end_address'])
@@ -108,6 +110,14 @@ def choose_junction():
 @app.route('/')
 def index():
     return render_template('index.html', mapbox_token=MAPBOX_TOKEN)
+
+@app.route('/reset', methods=['POST'])
+def reset_sim():
+    try:
+        sim.reset()
+        return jsonify({"message": "simulation reset"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run()
