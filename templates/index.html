@@ -7,9 +7,12 @@
 
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-
-  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  
   <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+
+  <link href="https://api.mapbox.com/search-js/v1.3.0/web.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/search-js/v1.3.0/web.js"></script>
 
   <style>
     html, body { height: 100%; margin: 0; }
@@ -31,17 +34,29 @@
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body gap-4">
         <h2 class="card-title">Enter Route</h2>
-
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Start Address</legend>
-          <input id="start" type="text" class="input input-bordered w-full" placeholder="Enter Start Address" />
+          <mapbox-search-box 
+            id="start" 
+            placeholder="Enter Start Address" 
+            access-token="{{ mapbox_token }}" 
+            types="address,poi"
+            proximity="-73.965, 40.782"
+          >
+          </mapbox-search-box>
         </fieldset>
 
         <fieldset class="fieldset">
           <legend class="fieldset-legend">End Address</legend>
-          <input id="end" type="text" class="input input-bordered w-full" placeholder="Enter End Address" />
+          <mapbox-search-box 
+            id="end" 
+            placeholder="Enter End Address" 
+            access-token="{{ mapbox_token }}" 
+            types="address,poi"
+            proximity="-73.965, 40.782"
+          >
+          </mapbox-search-box>
         </fieldset>
-
         <div class="card-actions justify-end">
           <button id="beginBtn" class="btn btn-primary">Begin Route</button>
         </div>
@@ -76,21 +91,41 @@
         </label>
 
         <div class="card-actions justify-end">
-          <button id="newDestBtn" class="btn btn-ghost">New Destination</button>
+          <button id="endRouteBtn" class="btn btn-ghost">End Route</button>
         </div>
       </div>
     </div>
   </div>
   <script>
-
     mapboxgl.accessToken = "{{ mapbox_token }}";
     const map = new mapboxgl.Map({
       container: 'map',
       style: 'mapbox://styles/mapbox/streets-v11',
-      center: [-84.51, 39.10],
+      center: [-73.965, 40.782],
       zoom: 13
     });
+    
+    const startBox = document.getElementById("start");
+    const endBox = document.getElementById("end");
 
+    let startData = null;
+    let endData = null;
+
+    startBox.addEventListener("retrieve", (e) => {
+      const feature = e.detail.features[0];
+      console.log("Feature type:", feature.properties.feature_type);
+      setTimeout(() => {
+        startBox.value = feature.properties.full_address;
+      }, 0);
+    });
+
+    endBox.addEventListener("retrieve", (e) => {
+      const feature = e.detail.features[0];
+      setTimeout(() => {
+        endBox.value = feature.properties.full_address;
+      }, 0);
+    });
+    
     let marker = null;
     let ticker = null;
     let lastCoords = null;
@@ -349,6 +384,14 @@
     document.querySelector('#manualJunctions').addEventListener('change', async (e) => {
       const manual = e.target.checked;
       try {
+        if (!manual) {
+          const state = await (await fetch('/state')).json();
+          if (state.awaiting_junc_choice) {
+            e.target.checked = true;
+            return;
+          }
+        }
+
         await fetch('/junction_mode', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
@@ -359,12 +402,17 @@
           if (!ticker) { 
             ticker = setInterval(fetchNextCoords, animationDuration);
           }
+          await fetchNextCoords();
+          animating = true;
+          requestAnimationFrame(animateMarker);
+          segmentStartTime = null;
         }
       } catch (err) { 
-        console.error('Failed to set junction mode', err); }
+        console.error('Failed to set junction mode', err);
+      }
     });
 
-    document.querySelector('#newDestBtn').addEventListener('click', () => {
+    document.querySelector('#endRouteBtn').addEventListener('click', () => {
       clearJunctionCircs();
       if (map.getLayer('route-layer')) { 
         map.removeLayer('route-layer');

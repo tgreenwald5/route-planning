@@ -13,7 +13,7 @@ sim = DrivingSimulator()
 load_dotenv()
 MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN")
 
-with open("graphs/ham_county_drive.pkl", "rb") as f:
+with open("graphs/manhattan_drive.pkl", "rb") as f:
     PRELOADED_GRAPH = pickle.load(f)
 
 def geocode(address):
