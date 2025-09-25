@@ -32,16 +32,42 @@ Calculates a driving route using a start and an end address, simulates and displ
    pip install -r requirements.txt
    ```
 3. Set environment variable:
-   - Obtain a Mapbox access token 
-   - Create .env file in root folder
+   - Obtain a free [Mapbox Access Token](https://docs.mapbox.com/help/dive-deeper/access-tokens/)
+   - Create .env file in the project root
      ```bash
      MAPBOX_TOKEN=your_mapbox_access_token
+     GRAPH_PATH=graphs/Manhattan_New_York_USA_drive.pkl
      ```
 4. Start app:
    ```bash
    python server.py
    ```
    Open http://127.0.0.1:5000 in browser
+   
+
+## Working With Graph Data
+- The already included road network graph (graphs/Manhattan_New_York_USA_drive.pkl) contains road network data just for Manhattan, New York, USA.
+- However, road network graphs for other regions can be downloaded and used as well with the instructions below.
+
+### Downloading
+Use the provided download_graph.py script to download and save a road network graph:
+```bash
+python download_graph.py "[REGION_NAME]"
+```
+Example:
+```bash
+python download_graph.py "Atlanta, Georgia, USA"
+```
+This will create a pickle file in the graphs/ folder with the new road network graph:
+```bash
+graphs/Atlanta_Georgia_USA_drive.pkl
+```
+
+### Changing Road Network Graph
+Edit your .env file and set the graph path:
+```bash
+GRAPH_PATH=graphs/[GRAPH_FILENAME].pkl
+```
 
 
 ## Tech Used
@@ -52,37 +78,13 @@ Calculates a driving route using a start and an end address, simulates and displ
 - [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/guides)
 
 ### Backend
+- Python
 - [Flask](https://flask.palletsprojects.com/en/stable/)
 - [OSMnx](https://osmnx.readthedocs.io/en/stable/)
 - [Geopy](https://geopy.readthedocs.io/en/stable/)
 
 
-## Graph Data Used
-- The already included road network graph (graphs/ham_county_drive.pkl) contains street data just for Hamilton County, Ohio.
-- However, this can be changed out for any other region using the instructions below.
-
-  ### Changing Graph Region
-  1. Open generate_graph.py
-     - Change to your region of choice:
-     ```bash
-     PLACE_NAME = "Hamilton County, Ohio, USA"
-     ```
-  2. Run the script
-     - In terminal run:
-     ```bash
-     python generate_graph.py
-     ```
-  3. Use the new graph
-     - generate_graph.py will save the graph as a .pkl file inside the /graphs folder
-     - Then update server.py if the filename is different from ham_county_drive.pkl, for example:
-       ```bash
-       with open("graphs/your_new_file.pkl", "rb") as f:
-           PRELOADED_GRAPH = pickle.load(f)
-     - Restart the server and then your new road network will be used
-
 
 ## Citations
-  Boeing, G. (2025). Modeling and Analyzing Urban Networks and Amenities with OSMnx. 
-  Geographical Analysis, published online ahead of print. doi:10.1111/gean.70009
-  
-  
+  > Boeing, G. (2025). Modeling and Analyzing Urban Networks and Amenities with OSMnx. 
+  > Geographical Analysis, published online ahead of print. doi:10.1111/gean.70009
