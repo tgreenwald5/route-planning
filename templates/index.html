@@ -96,6 +96,7 @@
       </div>
     </div>
   </div>
+
   <script>
     mapboxgl.accessToken = "{{ mapbox_token }}";
     const map = new mapboxgl.Map({
@@ -124,7 +125,8 @@
         endBox.value = feature.properties.full_address;
       }, 0);
     });
-    
+
+    let routeId = null;
     let marker = null;
     let ticker = null;
     let lastCoords = null;
@@ -159,7 +161,7 @@
         await fetch('/set_speed', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ speed: val })
+          body: JSON.stringify({ speed: val, route_id: routeId })
         });
       } catch(e) { 
           console.error('Failed to set speed', e); 
@@ -193,7 +195,7 @@
       await fetch('/choose_junction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ next_node: nodeId })
+        body: JSON.stringify({ next_node: nodeId, route_id: routeId })
       });
       clearJunctionCircs();
 
@@ -202,7 +204,12 @@
       }
 
       try {
-        const state = await (await fetch('/state')).json();
+        const state = await (await fetch('/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route_id: routeId })
+        })).json();
+
         if (state.route_changed) {
             await refreshRouteLine();
         }
@@ -236,8 +243,12 @@
         if (!res.ok || data.error) {
           throw new Error(data.error || 'Failed to start route');
         } 
-
-        const routeRes = await fetch('/route');
+        routeId = data.route_id
+        const routeRes = await fetch('/route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route_id: routeId })
+        });
         const routeData = await routeRes.json();
         if (!routeData.geometry) {
           throw new Error('No route geometry returned');
@@ -284,8 +295,18 @@
     }
 
     async function fetchNextCoords() {
-      await fetch('/tick', { method: 'POST' });
-      const res = await fetch('/state');
+      await fetch('/tick', { 
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ route_id: routeId }) 
+      });
+
+      const res = await fetch('/state', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ route_id: routeId }) 
+      });
+
       const data = await res.json();
 
       if (data.awaiting_junc_choice) {
@@ -344,7 +365,12 @@
     }
 
     async function refreshRouteLine() {
-      const routeRes = await fetch('/route');
+      const routeRes = await fetch('/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route_id: routeId })
+      });
+
       const routeData = await routeRes.json();
       if (!routeData.geometry) { 
         return;
@@ -383,7 +409,12 @@
       const manual = e.target.checked;
       try {
         if (!manual) {
-          const state = await (await fetch('/state')).json();
+          const state = await (await fetch('/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ route_id: routeId })
+          })).json();
+
           if (state.awaiting_junc_choice) {
             e.target.checked = true;
             return;
@@ -392,9 +423,10 @@
 
         await fetch('/junction_mode', {
           method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ manual })
+          headers:{ 'Content-Type': 'application/json' },
+          body: JSON.stringify({ manual, route_id: routeId })
         });
+
         if (!manual) {
           clearJunctionCircs();
           if (!ticker) { 
@@ -412,7 +444,13 @@
     document.querySelector('#endRouteBtn').addEventListener('click', async () => {
       clearJunctionCircs();
 
-      await fetch('/reset', { method: 'POST' });
+      await fetch('/reset', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route_id: routeId }) 
+      });
+
+      routeId = null;
 
       if (map.getLayer('route-layer')) { 
         map.removeLayer('route-layer');
@@ -436,8 +474,19 @@
     });
 
     async function pollState() {
+      if (routeId == null) {
+        setTimeout(pollState, 1000);
+        return;
+      }
+
       try {
-        const state = await (await fetch('/state')).json();
+        const res = await fetch('/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route_id: routeId })
+        });
+        const state = await res.json();
+
         if (state.awaiting_junc_choice && state.junc_options?.length) {
           showJunctionCircs(state.junc_options);
         } else {

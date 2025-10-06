@@ -27,6 +27,8 @@ class DrivingSimulator:
         self.junc_options = []
         self.route_changed = False
         self.stop_at_junctions = True
+
+        self.last_used = 0.0
          
     def start(self):
         if self.graph == None or self.route == None:

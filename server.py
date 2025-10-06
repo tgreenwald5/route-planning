@@ -6,9 +6,12 @@ from urllib.parse import quote_plus
 import os
 from dotenv import load_dotenv
 import pickle
+import uuid
+import time
 
 app = Flask(__name__)
-sim = DrivingSimulator()
+sims = {} # route_id -> DrivingSimulator
+EXPIRY_SECONDS = 1800
 
 load_dotenv()
 MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN")
@@ -35,23 +38,51 @@ def geocode(address):
 def start_sim():
     try:
         data = request.json
-        sim.reset()
-
         graph = PRELOADED_GRAPH
+
         start_coords = geocode(data['start_address'])
         end_coords = geocode(data['end_address'])
         start_node = rh.coords_to_node(graph, start_coords)
         end_node = rh.coords_to_node(graph, end_coords)
         route = rh.calculate_route(graph, start_node, end_node)
+
+        # create new sim
+        sim = DrivingSimulator()
         sim.load_route(graph, route)
         sim.start()
-        return jsonify({"message": "simulation started"})
+
+        # generate route_id
+        route_id = str(uuid.uuid4())
+        sim.last_used = time.time()
+        sims[route_id] = sim
+
+        ##sim.load_route(graph, route)
+        ##sim.start()
+        return jsonify({"message": "simulation started", "route_id": route_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+def cleanup_sims():
+    now = time.time()
+    for ri in list(sims.keys()):
+        sim = sims[ri]
+        if getattr(sim, "last_used", now) + EXPIRY_SECONDS < now:
+            sims.pop(ri, None)
+
+def get_sim(route_id):
+    cleanup_sims()
+    sim = sims.get(route_id)
+    if sim == None:
+        raise ValueError("invalid route_id")
+    sim.last_used = time.time()
+    return sim
 
 @app.route('/set_speed', methods=['POST'])
 def set_speed():
     try:
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+
         speed = request.json['speed']
         sim.set_speed(speed)
         return jsonify({"message": "speed set"})
@@ -61,34 +92,44 @@ def set_speed():
 @app.route('/tick', methods=['POST'])
 def tick():
     try:
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+
         sim.tick()
         return jsonify({"message": "tick executed"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/route', methods=['GET'])
+@app.route('/route', methods=['POST'])
 def route():
     try:
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+
         geometry = rh.get_route_geometry(sim.graph, sim.route)
         if (not geometry) and getattr(sim, "current_coords", None):
             geometry = [sim.current_coords]
+
         sim.route_changed = False
         return jsonify({"geometry": geometry})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/state', methods=['GET'])
+@app.route('/state', methods=['POST'])
 def state():
     try:
-        state = sim.get_state()
-        return jsonify(state)
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+        return jsonify(sim.get_state())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/junction_mode', methods=['POST'])
 def junction_mode():
     try:
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+
         manual = bool(request.json.get('manual', True))
         sim.stop_at_junctions = manual
         if not manual and sim.awaiting_junc_choice:
@@ -102,6 +143,9 @@ def junction_mode():
 @app.route('/choose_junction', methods=['POST'])
 def choose_junction():
     try:
+        route_id = request.json['route_id']
+        sim = get_sim(route_id)
+
         next_node = request.json['next_node']
         sim.choose_junction_node(next_node)
         return jsonify({"message": "reroute successful"})
@@ -115,7 +159,8 @@ def index():
 @app.route('/reset', methods=['POST'])
 def reset_sim():
     try:
-        sim.reset()
+        route_id = request.json['route_id']
+        sims.pop(route_id, None)
         return jsonify({"message": "simulation reset"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
