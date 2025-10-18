@@ -26,7 +26,7 @@ class DrivingSimulator:
         self.awaiting_junc_choice = False
         self.junc_options = []
         self.route_changed = False
-        self.stop_at_junctions = True
+        self.stop_at_junctions = False
 
         self.last_used = 0.0
          
@@ -226,4 +226,4 @@ class DrivingSimulator:
         self.awaiting_junc_choice = False
         self.junc_options = []
         self.route_changed = False
-        self.stop_at_junctions = True 
+        self.stop_at_junctions = False 
